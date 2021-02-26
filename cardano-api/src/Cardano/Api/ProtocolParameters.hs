@@ -61,6 +61,7 @@ import           Data.Scientific (Scientific)
 import qualified Data.Text as Text
 import           Data.Time (NominalDiffTime, UTCTime)
 import           Data.Word (Word64)
+import qualified Data.Vector as Vector
 import           GHC.Generics
 import           Numeric.Natural
 
@@ -229,32 +230,92 @@ data ProtocolParameters era =
        protocolParamPrices :: Maybe Prices,
 
        -- | Max total script execution resources units allowed per tx
-       protocolParamMaxTxExUnits :: Maybe ExecutionUnits,
+       protocolParamMaxTxExUnits :: Maybe MaxTxExecutionUnits,
 
        -- | Max total script execution resources units allowed per block
-       protocolParamMaxBlockExUnits :: Maybe ExecutionUnits
+       protocolParamMaxBlockExUnits :: Maybe MaxBlockExecutionUnits
     }
   deriving (Eq, Generic, Show)
 
-data ExecutionUnits = ExecutionUnits Word64 Word64
-                    deriving (Eq, Show)
+newtype MaxTxExecutionUnits =
+    MaxTxExecutionUnits { unMaxTxExecutionUnits :: ExecutionUnits}
+    deriving (Eq, Show)
 
-instance FromJSON ExecutionUnits where
-  parseJSON = error "TODO"
+instance ToJSON MaxTxExecutionUnits where
+  toJSON (MaxTxExecutionUnits (ExecutionUnits space time)) =
+    object [ "maxTxExecutionUnits" .=
+                object ["space" .= space, "time" .= time]
+           ]
+
+instance FromJSON MaxTxExecutionUnits where
+  parseJSON = withObject "MaxTxExecutionUnits" $ \o -> do
+    obj <- o .: "maxTxExecutionUnits"
+    MaxTxExecutionUnits
+      <$> (ExecutionUnits <$> obj .: "space" <*> obj .: "time")
+
+newtype MaxBlockExecutionUnits =
+    MaxBlockExecutionUnits { unMaxBlockExecutionUnits :: ExecutionUnits}
+    deriving (Eq, Show)
+
+instance ToJSON MaxBlockExecutionUnits where
+  toJSON (MaxBlockExecutionUnits (ExecutionUnits space time)) =
+    object [ "maxBlockExecutionUnits" .=
+                object ["space" .= space, "time" .= time]
+           ]
+
+instance FromJSON MaxBlockExecutionUnits where
+  parseJSON = withObject "MaxBlockExecutionUnits" $ \o -> do
+    obj <- o .: "maxBlockExecutionUnits"
+    MaxBlockExecutionUnits
+      <$> (ExecutionUnits <$> obj .: "space" <*> obj .: "time")
+
+data ExecutionUnits
+    = ExecutionUnits { space :: Word64
+                     , time :: Word64
+                     } deriving (Eq, Show)
 
 
-data CostModel = CostModel (Map AnyScriptLanguage (Map.Map ByteString Integer))
-              deriving (Eq,Show)
+newtype CostModel = CostModel (Map AnyScriptLanguage Cost)
+                  deriving (Eq,Show)
+
+newtype Cost = Cost (Map.Map ByteString Integer)
+             deriving (Eq, Show)
+
+instance ToJSON Cost where
+  toJSON (Cost _map) = error "TODO"
+  --I think this will vary depending on the  script version if this
+  -- is the case Cost may be able to be an integer (as the script verison)
+  -- is present in AnyScriptLanguage
+
+instance ToJSON CostModel where
+  toJSON (CostModel map') =
+    Aeson.Array
+      $ Vector.fromList
+        [ object ["scriptLanguage" .= aScriptLang, "costModel" .= costModel]
+        | (aScriptLang, costModel) <- Map.toList map'
+        ]
 
 instance FromJSON CostModel where
-  parseJSON = error "TODO"
+  parseJSON = withObject "CostModel" $ \_o -> do
+   -- _obj <- o .: "costModels"
+    error ""
 
-data Prices = Prices Lovelace Lovelace
+
+data Prices = Prices { perUnitSpace :: Lovelace
+                     , perUnitTime :: Lovelace
+                     }
             deriving (Eq, Show)
 
 instance FromJSON Prices where
-  parseJSON = error "TODO"
+  parseJSON = withObject "Prices" $ \o -> do
+    obj <- o .: "prices"
+    Prices <$> obj .: "unitSpace" <*> obj .: "unitTime"
 
+instance ToJSON Prices where
+  toJSON (Prices perSpace perTime) =
+    object [ "prices" .= object
+             [ "unitSpace" .= perSpace , "unitTime" .= perTime]
+           ]
 
 instance IsCardanoEra era => FromJSON (ProtocolParameters era) where
   parseJSON = parseProtocolParameters cardanoEra
@@ -372,27 +433,95 @@ parseProtocolParameters AlonzoEra =
                         <*> o .: "maxBlockExecUnits"
 
 
-instance ToJSON (ProtocolParameters era) where
-  toJSON pp = object [ "extraPraosEntropy" .= protocolParamExtraPraosEntropy pp
-                     , "stakePoolTargetNum" .= protocolParamStakePoolTargetNum pp
-                     , "poolRetireMaxEpoch" .= protocolParamPoolRetireMaxEpoch pp
-                     , "decentralization" .= (fromRational $ protocolParamDecentralization pp :: Scientific)
-                     , "stakePoolDeposit" .= protocolParamStakePoolDeposit pp
-                     , "maxBlockHeaderSize" .= protocolParamMaxBlockHeaderSize pp
-                     , "maxBlockBodySize" .= protocolParamMaxBlockBodySize pp
-                     , "maxTxSize" .= protocolParamMaxTxSize pp
-                     , "treasuryCut" .= (fromRational $ protocolParamTreasuryCut pp :: Scientific)
-                     , "minPoolCost" .= protocolParamMinPoolCost pp
-                     , "monetaryExpansion" .= (fromRational $ protocolParamMonetaryExpansion pp :: Scientific)
-                     , "stakeAddressDeposit" .= protocolParamStakeAddressDeposit pp
-                     , "poolPledgeInfluence" .= (fromRational $ protocolParamPoolPledgeInfluence pp :: Scientific)
-                     , "protocolVersion" .= let (major, minor) = protocolParamProtocolVersion pp
-                                            in object ["major" .= major, "minor" .= minor]
-                     , "txFeeFixed" .= protocolParamTxFeeFixed pp
-                     , "txFeePerByte" .= protocolParamTxFeePerByte pp
-                     , "minUTxOValue"  .= protocolParamMinUTxOValue pp
-                     ]
-
+instance IsCardanoEra era => ToJSON (ProtocolParameters era) where
+  toJSON pp =
+    case cardanoEra :: CardanoEra era of
+      ByronEra -> error "NO PPARAMS"
+      ShelleyEra ->
+        object [ "extraPraosEntropy" .= protocolParamExtraPraosEntropy pp
+               , "stakePoolTargetNum" .= protocolParamStakePoolTargetNum pp
+               , "poolRetireMaxEpoch" .= protocolParamPoolRetireMaxEpoch pp
+               , "decentralization" .= (fromRational $ protocolParamDecentralization pp :: Scientific)
+               , "stakePoolDeposit" .= protocolParamStakePoolDeposit pp
+               , "maxBlockHeaderSize" .= protocolParamMaxBlockHeaderSize pp
+               , "maxBlockBodySize" .= protocolParamMaxBlockBodySize pp
+               , "maxTxSize" .= protocolParamMaxTxSize pp
+               , "treasuryCut" .= (fromRational $ protocolParamTreasuryCut pp :: Scientific)
+               , "minPoolCost" .= protocolParamMinPoolCost pp
+               , "monetaryExpansion" .= (fromRational $ protocolParamMonetaryExpansion pp :: Scientific)
+               , "stakeAddressDeposit" .= protocolParamStakeAddressDeposit pp
+               , "poolPledgeInfluence" .= (fromRational $ protocolParamPoolPledgeInfluence pp :: Scientific)
+               , "protocolVersion" .= let (major, minor) = protocolParamProtocolVersion pp
+                                      in object ["major" .= major, "minor" .= minor]
+               , "txFeeFixed" .= protocolParamTxFeeFixed pp
+               , "txFeePerByte" .= protocolParamTxFeePerByte pp
+               , "minUTxOValue"  .= protocolParamMinUTxOValue pp
+               ]
+      AllegraEra ->
+        object [ "extraPraosEntropy" .= protocolParamExtraPraosEntropy pp
+               , "stakePoolTargetNum" .= protocolParamStakePoolTargetNum pp
+               , "poolRetireMaxEpoch" .= protocolParamPoolRetireMaxEpoch pp
+               , "decentralization" .= (fromRational $ protocolParamDecentralization pp :: Scientific)
+               , "stakePoolDeposit" .= protocolParamStakePoolDeposit pp
+               , "maxBlockHeaderSize" .= protocolParamMaxBlockHeaderSize pp
+               , "maxBlockBodySize" .= protocolParamMaxBlockBodySize pp
+               , "maxTxSize" .= protocolParamMaxTxSize pp
+               , "treasuryCut" .= (fromRational $ protocolParamTreasuryCut pp :: Scientific)
+               , "minPoolCost" .= protocolParamMinPoolCost pp
+               , "monetaryExpansion" .= (fromRational $ protocolParamMonetaryExpansion pp :: Scientific)
+               , "stakeAddressDeposit" .= protocolParamStakeAddressDeposit pp
+               , "poolPledgeInfluence" .= (fromRational $ protocolParamPoolPledgeInfluence pp :: Scientific)
+               , "protocolVersion" .= let (major, minor) = protocolParamProtocolVersion pp
+                                      in object ["major" .= major, "minor" .= minor]
+               , "txFeeFixed" .= protocolParamTxFeeFixed pp
+               , "txFeePerByte" .= protocolParamTxFeePerByte pp
+               , "minUTxOValue"  .= protocolParamMinUTxOValue pp
+               ]
+      MaryEra ->
+        object [ "extraPraosEntropy" .= protocolParamExtraPraosEntropy pp
+               , "stakePoolTargetNum" .= protocolParamStakePoolTargetNum pp
+               , "poolRetireMaxEpoch" .= protocolParamPoolRetireMaxEpoch pp
+               , "decentralization" .= (fromRational $ protocolParamDecentralization pp :: Scientific)
+               , "stakePoolDeposit" .= protocolParamStakePoolDeposit pp
+               , "maxBlockHeaderSize" .= protocolParamMaxBlockHeaderSize pp
+               , "maxBlockBodySize" .= protocolParamMaxBlockBodySize pp
+               , "maxTxSize" .= protocolParamMaxTxSize pp
+               , "treasuryCut" .= (fromRational $ protocolParamTreasuryCut pp :: Scientific)
+               , "minPoolCost" .= protocolParamMinPoolCost pp
+               , "monetaryExpansion" .= (fromRational $ protocolParamMonetaryExpansion pp :: Scientific)
+               , "stakeAddressDeposit" .= protocolParamStakeAddressDeposit pp
+               , "poolPledgeInfluence" .= (fromRational $ protocolParamPoolPledgeInfluence pp :: Scientific)
+               , "protocolVersion" .= let (major, minor) = protocolParamProtocolVersion pp
+                                      in object ["major" .= major, "minor" .= minor]
+               , "txFeeFixed" .= protocolParamTxFeeFixed pp
+               , "txFeePerByte" .= protocolParamTxFeePerByte pp
+               , "minUTxOValue"  .= protocolParamMinUTxOValue pp
+               ]
+      AlonzoEra ->
+        object [ "extraPraosEntropy" .= protocolParamExtraPraosEntropy pp
+               , "stakePoolTargetNum" .= protocolParamStakePoolTargetNum pp
+               , "poolRetireMaxEpoch" .= protocolParamPoolRetireMaxEpoch pp
+               , "decentralization" .= (fromRational $ protocolParamDecentralization pp :: Scientific)
+               , "stakePoolDeposit" .= protocolParamStakePoolDeposit pp
+               , "maxBlockHeaderSize" .= protocolParamMaxBlockHeaderSize pp
+               , "maxBlockBodySize" .= protocolParamMaxBlockBodySize pp
+               , "maxTxSize" .= protocolParamMaxTxSize pp
+               , "treasuryCut" .= (fromRational $ protocolParamTreasuryCut pp :: Scientific)
+               , "minPoolCost" .= protocolParamMinPoolCost pp
+               , "monetaryExpansion" .= (fromRational $ protocolParamMonetaryExpansion pp :: Scientific)
+               , "stakeAddressDeposit" .= protocolParamStakeAddressDeposit pp
+               , "poolPledgeInfluence" .= (fromRational $ protocolParamPoolPledgeInfluence pp :: Scientific)
+               , "protocolVersion" .= let (major, minor) = protocolParamProtocolVersion pp
+                                      in object ["major" .= major, "minor" .= minor]
+               , "txFeeFixed" .= protocolParamTxFeeFixed pp
+               , "txFeePerByte" .= protocolParamTxFeePerByte pp
+               , "minUTxOValue"  .= protocolParamMinUTxOValue pp
+               -- Alonzo era additions
+               , "costModels"  .= protocolParamCostModels pp
+               , "execPrices" .= protocolParamPrices pp
+               , "maxTxExecutionUnits" .= protocolParamMaxTxExUnits pp
+               , "maxBlockExecutionUnits" .= protocolParamMaxBlockExUnits pp
+               ]
 -- ----------------------------------------------------------------------------
 -- Updates to the protocol paramaters
 --
@@ -940,8 +1069,8 @@ fromShelleyPParams shelleyBasedEra' pparams =
         , protocolParamUTxOCostPerByte     = Just 0
         , protocolParamCostModels          = Just $ CostModel empty
         , protocolParamPrices              = Just $ Prices 0 0
-        , protocolParamMaxTxExUnits        = Just $ ExecutionUnits 0 0
-        , protocolParamMaxBlockExUnits     = Just $ ExecutionUnits 0 0
+        , protocolParamMaxTxExUnits        = Just . MaxTxExecutionUnits $ ExecutionUnits 0 0
+        , protocolParamMaxBlockExUnits     = Just . MaxBlockExecutionUnits $ ExecutionUnits 0 0
         }
 
 

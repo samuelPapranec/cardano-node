@@ -200,8 +200,36 @@ data AnyScriptLanguage where
 
 deriving instance (Show AnyScriptLanguage)
 
+instance ToJSON AnyScriptLanguage where
+  toJSON (AnyScriptLanguage (PlutusScriptLanguage ver)) =
+    object [ "scriptLanguage" .= Aeson.String "Plutus"
+           , case ver of
+               PlutusScriptV1 -> "version" .= Aeson.String "PlutusScriptV1"
+           ]
+  toJSON (AnyScriptLanguage (SimpleScriptLanguage ver)) =
+    object [ "scriptLanguage" .= Aeson.String "Simple"
+           , case ver of
+               SimpleScriptV1 -> "version" .= Aeson.String "SimpleScriptV1"
+               SimpleScriptV2 -> "version" .= Aeson.String "SimpleScriptV2"
+           ]
+
 instance FromJSON AnyScriptLanguage where
-    parseJSON = error "TODO"
+    parseJSON = withObject "AnyScriptLanguage" $ \o -> do
+      v <- o .: "scriptLanguage"
+      case v of
+        Aeson.String "Plutus" -> return . AnyScriptLanguage $ PlutusScriptLanguage PlutusScriptV1
+        Aeson.String "Simple" -> do ver <- o .: "version"
+                                    case ver of
+                                      Aeson.String "SimpleScriptV1" ->
+                                        return . AnyScriptLanguage $ SimpleScriptLanguage SimpleScriptV1
+                                      Aeson.String "SimpleScriptV2" ->
+                                        return . AnyScriptLanguage $ SimpleScriptLanguage SimpleScriptV2
+                                      err -> fail $ "Error parsing \"version\". Expected \"SimpleScriptV1\" or \"SimpleScriptV2\" \
+                                                  \ but got: " <> show err
+
+        err -> fail $ "Error parsing \"scriptLanguage\". Expected \"Plutus\" or \"Simple\" \
+                      \ but got: " <> show err
+
 
 instance Aeson.FromJSONKey AnyScriptLanguage where
     fromJSONKey = error "TODO"

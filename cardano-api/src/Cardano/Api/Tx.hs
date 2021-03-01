@@ -591,27 +591,23 @@ makeShelleyBootstrapWitness nwOrAddr (ShelleyTxBody era txbody _) sk =
     case era of
       ShelleyBasedEraShelley ->
         makeShelleyBasedBootstrapWitness
-          (Proxy :: Proxy (Ledger.ShelleyEra StandardCrypto))
           era nwOrAddr txbody sk
       ShelleyBasedEraAllegra ->
         makeShelleyBasedBootstrapWitness
-          (Proxy :: Proxy (Ledger.AllegraEra StandardCrypto))
           era nwOrAddr txbody sk
       ShelleyBasedEraMary    ->
         makeShelleyBasedBootstrapWitness
-          (Proxy :: Proxy (Ledger.MaryEra StandardCrypto))
           era nwOrAddr txbody sk
 
-makeShelleyBasedBootstrapWitness :: forall era ledgerera proxy.
+makeShelleyBasedBootstrapWitness :: forall era ledgerera.
                                     Shelley.ShelleyBased ledgerera
                                  => Ledger.Crypto ledgerera ~ StandardCrypto
-                                 => proxy ledgerera
-                                 -> ShelleyBasedEra era
+                                 => ShelleyBasedEra era
                                  -> WitnessNetworkIdOrByronAddress
                                  -> Ledger.TxBody ledgerera
                                  -> SigningKey ByronKey
                                  -> Witness era
-makeShelleyBasedBootstrapWitness _ era nwOrAddr txbody (ByronSigningKey sk) =
+makeShelleyBasedBootstrapWitness era nwOrAddr txbody (ByronSigningKey sk) =
     ShelleyBootstrapWitness era $
       -- Byron era witnesses were weird. This reveals all that weirdness.
       Shelley.BootstrapWitness {
